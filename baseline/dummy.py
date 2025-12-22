@@ -14,9 +14,9 @@ def run_dummy_baseline(
     # 1) Load dataset
     df = pd.read_csv(path)  # Convert dataset to pandas DataFrame
 
-    print("Columns:", list(df.columns))
-    print("Rows:", len(df))
-    print(df.head(3))
+    # print("Columns:", list(df.columns))
+    # print("Rows:", len(df))
+    # print(df.head(3))
 
     # 2) Choose columns + remove missing rows
     df = df.dropna(subset=[text_col, label_col]).copy()
@@ -24,9 +24,9 @@ def run_dummy_baseline(
     X_text = df[text_col].astype(str)  # reviews
     y = df[label_col].astype(str)      # labels: "positive"/"negative"
 
-    #label distribution
-    print("\nLabel value counts:")
-    print(y.value_counts().head(10))
+    # #label distribution
+    # print("\nLabel value counts:")
+    # print(y.value_counts().head(10))
 
     # 3) Train/Test split (80% train, 20% test)
     X_train, X_test, y_train, y_test = train_test_split(
