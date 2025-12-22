@@ -1,15 +1,17 @@
 import pandas as pd
-from numpy.ma.core import negative
+import re
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
-def run_rules_baseline(
-    path: str = r"Data\IMDB Dataset.csv",
-    text_col: str = "review",
-    label_col: str = "sentiment"
-):
-    print("[rules_model] start")
-    print(f"[rules_model] reading: {path}")
+
+
+def tokenize(text):
+    text = text.lower()
+    text = re.sub(r"[^a-z\s]", "", text) #deleting all except a-z and spase
+    return text.split()
+
+def keyword_classifier(review):
+    words = tokenize(review)
     positive_words = [
         "good", "great", "wonderful", "best", "love", "liked",
         "enjoyed", "excellent", "amazing", "perfect", "well",
@@ -18,40 +20,53 @@ def run_rules_baseline(
     negative_words = [
         "negative", "bad", "worst", "boring", "awful", "waste",
         "terrible", "annoying", "poor", "disappointing", "hard"
+        ,"pointless","hate"
     ]
+
+    pos_count = 0
+    neg_count = 0
+
+    for word in words:
+        if word in positive_words:
+            pos_count += 1
+        elif word in negative_words:
+            neg_count += 1
+
+    if pos_count > neg_count:
+        return "positive"
+    return "negative"
+
+def run_rules_baseline(
+    path: str = r"Data\IMDB Dataset.csv",
+    text_col: str = "review",
+    label_col: str = "sentiment"
+):
+    print("[rules_model] start")
+    print(f"[rules_model] reading: {path}")
+
 
     # 1) Load dataset
     df = pd.read_csv(path)  # Convert dataset to pandas DataFrame
-    #
-    # # print("Columns:", list(df.columns))
-    # # print("Rows:", len(df))
-    # # print(df.head(3))
-    #
-    # # 2) Choose columns + remove missing rows
-    # df = df.dropna(subset=[text_col, label_col]).copy()
-    #
-    # X_text = df[text_col].astype(str)  # reviews
-    # y = df[label_col].astype(str)      # labels: "positive"/"negative"
-    #
-    # # #label distribution
-    # # print("\nLabel value counts:")
-    # # print(y.value_counts().head(10))
-    #
-    # # 3) Train/Test split (80% train, 20% test)
-    # X_train, X_test, y_train, y_test = train_test_split(
-    #     X_text, y, test_size=0.2, random_state=42, stratify=y
-    # )
-    #
-    # # 4) classification model: always predict most frequent class
-    # model = DummyClassifier(strategy="most_frequent")
-    # model.fit(X_train, y_train)
-    # y_pred = model.predict(X_test)
-    #
-    # acc = accuracy_score(y_test, y_pred)
-    #
-    # print("\n=== DummyClassifier (most_frequent) Results ===")
-    # print(f"Accuracy = {acc:.4f}")
-    # print("\nClassification report:")
-    # print(classification_report(y_test, y_pred, zero_division=0))
-    #
-    # print("[DummyBaseline] end")
+
+    X = df[text_col].astype(str)
+    y = df[label_col].astype(str)
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+    y_pred=[]
+    for r in X_test:
+        y_pred.append(keyword_classifier(r))
+
+    acc = accuracy_score(y_test, y_pred)
+
+    print("\n=== RuleClassifier Results ===")
+    print(f"Accuracy = {acc:.4f}")
+    print("\nClassification report:")
+    print(classification_report(y_test, y_pred, zero_division=0))
+
+    print("[RuleClassifier] end")
+
+
+if __name__ == "__main__":
+    run_rules_baseline()

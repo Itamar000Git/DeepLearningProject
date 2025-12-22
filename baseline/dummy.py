@@ -46,3 +46,7 @@ def run_dummy_baseline(
     print(classification_report(y_test, y_pred, zero_division=0))
 
     print("[DummyBaseline] end")
+
+
+if __name__ == "__main__":
+    run_dummy_baseline()
