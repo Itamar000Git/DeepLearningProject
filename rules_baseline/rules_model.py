@@ -9,18 +9,18 @@ def tokenize(text):
     text = text.lower()
     text = re.sub(r"[^a-z\s]", "", text) #deleting all except a-z and spase
     return text.split()
-
+#"good", "nice" ,
+#"hard","hate",
 def keyword_classifier(review):
     words = tokenize(review)
     positive_words = [
-        "good", "great", "wonderful", "best", "love", "liked",
-        "enjoyed", "excellent", "amazing", "perfect", "well",
-        "positive", "nice"
+         "great", "best", "love", "liked",
+         "perfect", "well","positive"
+        , "wonderful", "excellent", "amazing", "enjoyed"
     ]
     negative_words = [
-        "negative", "bad", "worst", "boring", "awful", "waste",
-        "terrible", "annoying", "poor", "disappointing", "hard"
-        ,"pointless","hate"
+        "bad","negative","worst", "boring", "awful", "waste",
+        "pointless", "terrible", "annoying", "poor", "disappointing"
     ]
 
     pos_count = 0

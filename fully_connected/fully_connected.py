@@ -6,6 +6,7 @@ from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 import re
 
+from torch import optim
 
 vocabulary_size = 0
 word2location = {}
@@ -15,25 +16,19 @@ wordcounter = {}
 def prepare_vocabulary(data, max_vocab=20000):
     global wordcounter, word2location, vocabulary_size
 
-    #wordcounter = {}
-    #word2location = {}
 
-    # 1) count words
     for sentence in data:
         sentence = sentence.lower()
         sentence = re.sub(r"[^a-z\s]", " ", sentence)
         for word in sentence.split():
             wordcounter[word] = wordcounter.get(word, 0) + 1
 
-    # 2) take top-K words by frequency
-    # sorted returns list of tuples: [(word, count), ...]
     print("sorting")
     top_items = sorted(wordcounter.items(), key=lambda kv: kv[1], reverse=True)[:max_vocab]
     print("end sorting")
 
     top_words = [w for w, _ in top_items]
 
-    # 3) rebuild word2location with new compact indices
     word2location = {w: i for i, w in enumerate(top_words)}
 
     vocabulary_size = len(word2location)
@@ -48,13 +43,24 @@ def convert2vec(sentence):
 
 
 # Define the model
-class LogisticRegressionModel(nn.Module):
+class MLPModel(nn.Module):
     def __init__(self, input_dim):
-        super().__init__()
-        self.linear = nn.Linear(input_dim, 1)
+        super(MLPModel, self).__init__()
+        self.linear1 = nn.Linear(input_dim, 128)
+        self.linear2 = nn.Linear(128, 32)
+        self.linear3 = nn.Linear(32, 1)
 
     def forward(self, x):
-        out = torch.sigmoid(self.linear(x))
+        x = self.linear1(x)
+        x = torch.relu(x)
+
+        x = self.linear2(x)
+        x = torch.relu(x)
+
+        x = self.linear3(x)
+
+
+        out = torch.sigmoid(x)
         return out
 
 
@@ -76,24 +82,17 @@ def run_logisticModel(
 
     #features = vocabulary_size
     # Initialize the model
-    model = LogisticRegressionModel(features)
 
-    # Loss and optimizer
-    criterion = nn.BCELoss(reduction='mean')  # Binary Cross Entropy Loss
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.03)  # Stochastic Gradient Descent
-    # Data preparation
-    # Assuming convert2vec and data are defined somewhere above
-    #
-    # data_x = torch.tensor([convert2vec(r) for r in X_train],dtype=torch.float32)
+    model = MLPModel(input_dim=20000)
+    criterion = nn.BCELoss()
+    optimizer = optim.SGD(model.parameters(), lr=0.01)
+
     X_train_np = np.stack([convert2vec(r) for r in X_train]).astype(np.float32)
     data_x = torch.from_numpy(X_train_np)
 
-    data_y = torch.tensor([1 if y == "positive" else 0 for y in y_train],dtype=torch.float32).unsqueeze(1)
+    data_y = torch.tensor([1 if y == "positive" else 0 for y in y_train], dtype=torch.float32).unsqueeze(1)
 
-    # Training the model
-    model.train()
-
-    for i in range(200000):
+    for epoch in range(10000):
         optimizer.zero_grad()  # Clear gradients w.r.t. parameters
         outputs = model(data_x)
         # print(outputs.shape)
@@ -101,9 +100,9 @@ def run_logisticModel(
         loss = criterion(outputs, data_y)  # Calculate the loss
         loss.backward()  # Getting gradients w.r.t. parameters
         optimizer.step()  # Updating parameters
-        if i % 1000 == 0:
+        if epoch % 500 == 0:
             # Print out the loss
-            print(f'Loss:', {loss.item()})
+            print(f'Epoch [{epoch}/10000], Loss: {loss.item():.4f}')
 
     # x_test_vec = torch.tensor([convert2vec(r) for r in X_test],dtype=torch.float32)
     X_test_np = np.stack([convert2vec(r) for r in X_test]).astype(np.float32)
@@ -112,20 +111,28 @@ def run_logisticModel(
     y_test_vec = torch.tensor([1 if y == "positive" else 0 for y in y_test],dtype=torch.float32).unsqueeze(1)
 
     with torch.no_grad():
-        y_pred = model(x_test_vec)
-        y_pred_bin = (y_pred > 0.5).float()
+        predictions = model(x_test_vec)
+
+        # 2. המרה להחלטה בינארית (Thresholding)
+        # כל מה שגדול מ-0.5 הופך ל-1, וכל השאר ל-0
+        predicted_labels = (predictions > 0.5).float()
+
+        # 3. המרה ל-Numpy (כי sklearn לא עובד ישירות עם טנסורים של PyTorch)
+        y_true = y_test_vec.cpu().numpy()
+        y_pred = predicted_labels.cpu().numpy()
+
+        # 4. הדפסת אחוז דיוק (Accuracy)
+        accuracy = accuracy_score(y_true, y_pred)
+        print("\n=== FullyConnectedClassifier Results ===")
+        print(f"Final Accuracy: {accuracy * 100:.2f}%")
+        print("-" * 60)
+
+        # 5. הדפסת טבלה מסודרת (Classification Report)
+        # אפשר לשנות את השמות ב-target_names למה שמתאים (למשל: Negative, Positive)
+        print(classification_report(y_true, y_pred, target_names=["Class 0", "Class 1"], zero_division=0))
 
 
-
-    acc = accuracy_score(y_test_vec, y_pred_bin)
-    # acc = accuracy_score(y_test_vec.cpu().numpy(), y_pred_bin.cpu().numpy())
-
-    print("\n=== logisticModelClassifier Results ===")
-    print(f"Accuracy = {acc:.4f}")
-    print("\nClassification report:")
-    print(classification_report(y_test_vec, y_pred_bin, zero_division=0))
-
-    print("[RuleClassifier] end")
+    print("[FullyConnectedClassifier] end")
 
 
 if __name__ == "__main__":
