@@ -35,10 +35,10 @@ def run_dummy_baseline(
 
     # 4) classification model: always predict most frequent class
     model = DummyClassifier(strategy="most_frequent")
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
+    model.fit(X_train, y_train) # training the model
+    y_pred = model.predict(X_test) # resolve the prediction
 
-    acc = accuracy_score(y_test, y_pred)
+    acc = accuracy_score(y_test, y_pred) # matching the prediction to the true results
 
     print("\n=== DummyClassifier (most_frequent) Results ===")
     print(f"Accuracy = {acc:.4f}")

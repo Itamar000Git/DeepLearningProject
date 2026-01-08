@@ -6,18 +6,24 @@ from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 import re
 
-
+# Global variables used to build the vocabulary:
+# vocabulary_size – number of words in the vocabulary
+# word2location – maps each word to an index in the vector
+# wordcounter – counts how many times each word appears
 vocabulary_size = 0
 word2location = {}
 wordcounter = {}
 
-
+# Builds a vocabulary from the training data.
+# Only the most frequent words (up to max_vocab) are kept.
 def prepare_vocabulary(data, max_vocab=20000):
     global wordcounter, word2location, vocabulary_size
 
     #wordcounter = {}
     #word2location = {}
 
+    # Count how many times each word appears in the training reviews.
+    # Text is cleaned and converted to lowercase before counting.
     # 1) count words
     for sentence in data:
         sentence = sentence.lower()
@@ -31,6 +37,7 @@ def prepare_vocabulary(data, max_vocab=20000):
     top_items = sorted(wordcounter.items(), key=lambda kv: kv[1], reverse=True)[:max_vocab]
     print("end sorting")
 
+    # Extract only the words (without their counts).
     top_words = [w for w, _ in top_items]
 
     # 3) rebuild word2location with new compact indices
@@ -39,6 +46,8 @@ def prepare_vocabulary(data, max_vocab=20000):
     vocabulary_size = len(word2location)
     return vocabulary_size
 
+# Convert a review into a numerical vector using Bag-of-Words.
+# The vector length equals the vocabulary size.
 def convert2vec(sentence):
     res_vec = np.zeros(vocabulary_size)
     for word in sentence.split(): #also here...
@@ -48,28 +57,38 @@ def convert2vec(sentence):
 
 
 # Define the model
+# A simple logistic regression model.
+# It applies one linear layer from input_dim to a single output.
 class LogisticRegressionModel(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         self.linear = nn.Linear(input_dim, 1)
 
+    # Forward pass:
+    # Linear transformation followed by sigmoid to produce a probability.
     def forward(self, x):
         out = torch.sigmoid(self.linear(x))
         return out
 
-
+# Loads the dataset, trains the logistic regression model,
+# and evaluates it on the test set.
 def run_logisticModel(
     path: str = r"Data\IMDB Dataset.csv",
     text_col: str = "review",
     label_col: str = "sentiment"
 ):
+    # Load the dataset and extract reviews (X) and labels (y).
     df = pd.read_csv(path)
     X = df[text_col].astype(str)
     y = df[label_col].astype(str)
 
+    # Split the dataset into training and test sets.
+    # 20% of the data is used for testing.
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
+
+    # Build the vocabulary using only the training data.
     global vocabulary_size
     features = prepare_vocabulary(X_train)
     vocabulary_size =features
@@ -80,19 +99,26 @@ def run_logisticModel(
 
     # Loss and optimizer
     criterion = nn.BCELoss(reduction='mean')  # Binary Cross Entropy Loss
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.03)  # Stochastic Gradient Descent
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.03)  # Gradient Descent
+
     # Data preparation
-    # Assuming convert2vec and data are defined somewhere above
-    #
-    # data_x = torch.tensor([convert2vec(r) for r in X_train],dtype=torch.float32)
+    # Convert all training reviews to vectors and then to a Torch tensor.
     X_train_np = np.stack([convert2vec(r) for r in X_train]).astype(np.float32)
     data_x = torch.from_numpy(X_train_np)
 
+    # Convert labels to binary values:
+    # positive -> 1, negative -> 0
     data_y = torch.tensor([1 if y == "positive" else 0 for y in y_train],dtype=torch.float32).unsqueeze(1)
 
-    # Training the model
+    # Set the model to training mode.
     model.train()
 
+    # Training loop:
+    # 1) Clear old gradients
+    # 2) Compute predictions
+    # 3) Compute loss
+    # 4) Backpropagate gradients
+    # 5) Update model weights
     for i in range(200000):
         optimizer.zero_grad()  # Clear gradients w.r.t. parameters
         outputs = model(data_x)
@@ -106,17 +132,20 @@ def run_logisticModel(
             print(f'Loss:', {loss.item()})
 
     # x_test_vec = torch.tensor([convert2vec(r) for r in X_test],dtype=torch.float32)
+    # Convert test reviews to vectors.
     X_test_np = np.stack([convert2vec(r) for r in X_test]).astype(np.float32)
     x_test_vec = torch.from_numpy(X_test_np)
 
+    # Convert test labels to binary format.
     y_test_vec = torch.tensor([1 if y == "positive" else 0 for y in y_test],dtype=torch.float32).unsqueeze(1)
 
+    # Disable gradients and make predictions.
+    # Convert probabilities to binary predictions using threshold 0.5.
     with torch.no_grad():
         y_pred = model(x_test_vec)
         y_pred_bin = (y_pred > 0.5).float()
 
-
-
+    # Calculate classification accuracy.
     acc = accuracy_score(y_test_vec, y_pred_bin)
     # acc = accuracy_score(y_test_vec.cpu().numpy(), y_pred_bin.cpu().numpy())
 
