@@ -5,17 +5,28 @@ import numpy as np
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 import re
-
 from torch import optim
+from torch.utils.data import TensorDataset, DataLoader
 
+# =========================
+# Globals
+# =========================
 vocabulary_size = 0
 word2location = {}
 wordcounter = {}
 
-
+# =========================
+# Vocabulary + Vectorization
+# =========================
 def prepare_vocabulary(data, max_vocab=20000):
+    """
+    Build Top-K vocabulary from TRAIN only.
+    """
     global wordcounter, word2location, vocabulary_size
 
+    # FIX: reset counters each run so vocab doesn't keep growing across runs
+    wordcounter = {}
+    word2location = {}
 
     for sentence in data:
         sentence = sentence.lower()
@@ -28,112 +39,146 @@ def prepare_vocabulary(data, max_vocab=20000):
     print("end sorting")
 
     top_words = [w for w, _ in top_items]
-
     word2location = {w: i for i, w in enumerate(top_words)}
-
     vocabulary_size = len(word2location)
     return vocabulary_size
 
+
 def convert2vec(sentence):
-    res_vec = np.zeros(vocabulary_size)
-    for word in sentence.split(): #also here...
-        if word in word2location:
-            res_vec[word2location[word]] += 1
+    # FIX: apply the SAME cleaning as in prepare_vocabulary (otherwise many words won't match the vocab)
+    sentence = sentence.lower()
+    sentence = re.sub(r"[^a-z\s]", " ", sentence)
+
+    # FIX: float32 saves memory and matches torch default float usage
+    res_vec = np.zeros(vocabulary_size, dtype=np.float32)
+
+    for word in sentence.split():
+        idx = word2location.get(word)
+        if idx is not None:
+            res_vec[idx] += 1.0  # (counts). If you want presence only: res_vec[idx] = 1.0
     return res_vec
 
 
-# Define the model
+# =========================
+# Fully Connected Neural Network (MLP)
+# =========================
 class MLPModel(nn.Module):
-    def __init__(self, input_dim):
-        super(MLPModel, self).__init__()
-        self.linear1 = nn.Linear(input_dim, 128)
-        self.linear2 = nn.Linear(128, 32)
-        self.linear3 = nn.Linear(32, 1)
+    # FIX: must be init (double underscores), not init
+    def __init__(self, input_dim, hidden1=128, hidden2=32, dropout_p=0.0):
+        super().__init__()  # FIX: correct super().init()
+        self.linear1 = nn.Linear(input_dim, hidden1)
+        self.linear2 = nn.Linear(hidden1, hidden2)
+        self.linear3 = nn.Linear(hidden2, 1)
+        self.dropout = nn.Dropout(dropout_p)
 
     def forward(self, x):
-        x = self.linear1(x)
-        x = torch.relu(x)
+        x = torch.relu(self.linear1(x))
+        x = self.dropout(x)
+        x = torch.relu(self.linear2(x))
+        x = self.dropout(x)
 
-        x = self.linear2(x)
-        x = torch.relu(x)
-
-        x = self.linear3(x)
-
-
-        out = torch.sigmoid(x)
-        return out
+        # FIX: return LOGITS (no sigmoid here) when using BCEWithLogitsLoss
+        logits = self.linear3(x)
+        return logits
 
 
-def run_logisticModel(
+# =========================
+# Train + Evaluate
+# =========================
+def run_fully_connected_nn(
     path: str = r"Data\IMDB Dataset.csv",
     text_col: str = "review",
-    label_col: str = "sentiment"
+    label_col: str = "sentiment",
+    max_vocab: int = 20000,
+    batch_size: int = 256,
+    epochs: int = 20,
+    lr: float = 2e-5,
+    hidden1: int = 128,
+    hidden2: int = 32,
+    dropout_p: float = 0.2,
+    seed: int = 42
 ):
-    df = pd.read_csv(path)
+    print("########### start fully connected model ###########")
+
+    df = pd.read_csv(path).dropna(subset=[text_col, label_col]).copy()
     X = df[text_col].astype(str)
     y = df[label_col].astype(str)
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
+        X, y, test_size=0.2, random_state=seed, stratify=y
     )
-    global vocabulary_size
-    features = prepare_vocabulary(X_train)
-    vocabulary_size =features
 
-    #features = vocabulary_size
-    # Initialize the model
+    # Build vocab on train only
+    features = prepare_vocabulary(X_train, max_vocab=max_vocab)
+    print("Vocabulary size:", features)
 
-    model = MLPModel(input_dim=20000)
-    criterion = nn.BCELoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.01)
-
+    # Vectorize
+    # FIX: np.stack -> one big ndarray -> torch.from_numpy (fast, no warning)
     X_train_np = np.stack([convert2vec(r) for r in X_train]).astype(np.float32)
-    data_x = torch.from_numpy(X_train_np)
+    X_test_np  = np.stack([convert2vec(r) for r in X_test]).astype(np.float32)
 
-    data_y = torch.tensor([1 if y == "positive" else 0 for y in y_train], dtype=torch.float32).unsqueeze(1)
+    data_x = torch.from_numpy(X_train_np)  # float32
+    test_x = torch.from_numpy(X_test_np)   # float32
+    # Labels
+    # FIX: make labels float + shape (N,1)
+    train_y = torch.tensor([1 if yy == "positive" else 0 for yy in y_train],
+                           dtype=torch.float32).unsqueeze(1)
+    test_y = torch.tensor([1 if yy == "positive" else 0 for yy in y_test],
+                          dtype=torch.float32).unsqueeze(1)
 
-    for epoch in range(10000):
-        optimizer.zero_grad()  # Clear gradients w.r.t. parameters
-        outputs = model(data_x)
-        # print(outputs.shape)
-        # print (data_y.shape)
-        loss = criterion(outputs, data_y)  # Calculate the loss
-        loss.backward()  # Getting gradients w.r.t. parameters
-        optimizer.step()  # Updating parameters
-        if epoch % 500 == 0:
-            # Print out the loss
-            print(f'Epoch [{epoch}/10000], Loss: {loss.item():.4f}')
+    # DataLoader (mini-batches)
+    # FIX: mini-batch training improves optimization vs full-batch
+    train_loader = DataLoader(
+        TensorDataset(data_x, train_y),
+        batch_size=batch_size,
+        shuffle=True
+    )
 
-    # x_test_vec = torch.tensor([convert2vec(r) for r in X_test],dtype=torch.float32)
-    X_test_np = np.stack([convert2vec(r) for r in X_test]).astype(np.float32)
-    x_test_vec = torch.from_numpy(X_test_np)
+    # Model
+    model = MLPModel(input_dim=features, hidden1=hidden1, hidden2=hidden2, dropout_p=dropout_p)
 
-    y_test_vec = torch.tensor([1 if y == "positive" else 0 for y in y_test],dtype=torch.float32).unsqueeze(1)
+    # Loss + Optimizer
+    # FIX: BCEWithLogitsLoss is numerically stable + works with logits
+    criterion = nn.BCEWithLogitsLoss()
 
+    # FIX: Adam converges faster/stabler than SGD for this setup
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    # Train
+    model.train()
+    for epoch in range(1, epochs + 1):
+        epoch_loss = 0.0
+
+        for xb, yb in train_loader:
+            optimizer.zero_grad()
+            logits = model(xb)  # logits
+            loss = criterion(logits, yb)  # targets shape (N,1)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item() * xb.size(0)
+
+        epoch_loss /= len(train_loader.dataset)
+        print(f"Epoch [{epoch}/{epochs}] Loss: {epoch_loss:.4f}")  # FIX: proper loss print (no {})
+
+    # Evaluate
+    model.eval()
     with torch.no_grad():
-        predictions = model(x_test_vec)
+        logits = model(test_x)
+        probs = torch.sigmoid(logits)  # convert logits -> probabilities
+        pred = (probs > 0.5).float()  # threshold -> 0/1
 
-        # 2. המרה להחלטה בינארית (Thresholding)
-        # כל מה שגדול מ-0.5 הופך ל-1, וכל השאר ל-0
-        predicted_labels = (predictions > 0.5).float()
+    # sklearn expects numpy arrays
+    y_true = test_y.numpy()
+    y_pred = pred.numpy()
 
-        # 3. המרה ל-Numpy (כי sklearn לא עובד ישירות עם טנסורים של PyTorch)
-        y_true = y_test_vec.cpu().numpy()
-        y_pred = predicted_labels.cpu().numpy()
+    acc = accuracy_score(y_true, y_pred)
+    print("\n=== FullyConnectedClassifier Results ===")
+    print(f"Accuracy = {acc:.4f}")
+    print("\nClassification report:")
+    print(classification_report(y_true, y_pred, zero_division=0))
 
-        # 4. הדפסת אחוז דיוק (Accuracy)
-        accuracy = accuracy_score(y_true, y_pred)
-        print("\n=== FullyConnectedClassifier Results ===")
-        print(f"Final Accuracy: {accuracy * 100:.2f}%")
-        print("-" * 60)
-
-        # 5. הדפסת טבלה מסודרת (Classification Report)
-        # אפשר לשנות את השמות ב-target_names למה שמתאים (למשל: Negative, Positive)
-        print(classification_report(y_true, y_pred, target_names=["Class 0", "Class 1"], zero_division=0))
-
-
-    print("[FullyConnectedClassifier] end")
+    print("########### end fully connected model ###########")
 
 
 if __name__ == "__main__":
-    run_logisticModel()
+    run_fully_connected_nn()
